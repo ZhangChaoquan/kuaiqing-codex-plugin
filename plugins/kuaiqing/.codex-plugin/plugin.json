@@ -1,0 +1,29 @@
+{
+  "name": "kuaiqing",
+  "version": "0.1.2",
+  "description": "Connect Codex to KuaiQing through the official OAuth MCP service and manage signed KuaiQing Skills.",
+  "author": {
+    "name": "KuaiQing",
+    "url": "https://my.kuaiqingweb.com"
+  },
+  "homepage": "https://my.kuaiqingweb.com",
+  "repository": "https://github.com/ZhangChaoquan/kuaiqing-codex-plugin",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "\u5feb\u64ce",
+    "shortDescription": "\u8fde\u63a5\u5feb\u64ce\u8d26\u53f7\u5e76\u7ba1\u7406\u5b98\u65b9 Skills\u3002",
+    "longDescription": "\u901a\u8fc7\u5feb\u64ce\u5b98\u65b9 OAuth \u8fdc\u7a0b MCP \u68c0\u67e5\u6216\u65ad\u5f00\u5f53\u524d\u8d26\u53f7\uff0c\u5e76\u68c0\u67e5\u3001\u5b89\u88c5\u3001\u66f4\u65b0\u6216\u56de\u6eda\u7ecf\u8fc7\u7b7e\u540d\u9a8c\u8bc1\u7684\u5feb\u64ce\u5b98\u65b9 Skills\u3002",
+    "developerName": "\u5feb\u64ce",
+    "category": "Productivity",
+    "capabilities": [
+      "Remote MCP",
+      "Signed Skills"
+    ],
+    "defaultPrompt": [
+      "\u68c0\u67e5\u5f53\u524d\u8fde\u63a5\u7684\u5feb\u64ce\u8d26\u53f7\u3002",
+      "\u5b89\u5168\u65ad\u5f00\u5f53\u524d\u5feb\u64ce\u8d26\u53f7\u3002",
+      "\u68c0\u67e5\u5feb\u64ce Skills \u662f\u5426\u6709\u66f4\u65b0\u3002"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

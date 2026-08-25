@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "kuaiqing": {
+      "type": "http",
+      "url": "https://my.kuaiqingweb.com/api/v1/agent-skills/mcp",
+      "oauth_resource": "https://my.kuaiqingweb.com/api/v1/agent-skills/mcp"
+    }
+  }
+}

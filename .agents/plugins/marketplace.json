@@ -1,0 +1,20 @@
+{
+  "name": "kuaiqing",
+  "interface": {
+    "displayName": "快擎"
+  },
+  "plugins": [
+    {
+      "name": "kuaiqing",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kuaiqing"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

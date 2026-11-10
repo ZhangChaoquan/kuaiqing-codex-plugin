@@ -155,6 +155,18 @@ class SkillManagerTest(unittest.TestCase):
         with self.assertRaises(sm.SkillManagerError):
             sm.parse_semver("1.0.0-alpha.01")
 
+    def test_download_uses_verified_https_with_hostname_checks(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.headers = {}
+        response.geturl.return_value = "https://skills.example.test/catalog.json"
+        response.read.return_value = b"{}"
+        with mock.patch.object(sm.urllib.request, "urlopen", return_value=response) as download:
+            self.assertEqual(sm.fetch_bytes("https://skills.example.test/catalog.json"), b"{}")
+        context = download.call_args.kwargs["context"]
+        self.assertEqual(context.verify_mode, sm.ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
     def test_network_failure_is_reported_without_raw_client_exception(self) -> None:
         with mock.patch.object(sm.urllib.request, "urlopen", side_effect=OSError("offline")):
             with self.assertRaisesRegex(sm.SkillManagerError, "下载失败"):

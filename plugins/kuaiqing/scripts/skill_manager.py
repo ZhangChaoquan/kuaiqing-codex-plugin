@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -81,7 +82,9 @@ def fetch_bytes(url: str, limit: int = MAX_PACKAGE_BYTES) -> bytes:
     validate_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": "KuaiQing-Skill-Manager/0.1"})
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        # Python.org macOS builds do not inherit the system trust bundle by default.
+        context = ssl.create_default_context(cafile="/etc/ssl/cert.pem" if sys.platform == "darwin" else None)
+        with urllib.request.urlopen(request, timeout=20, context=context) as response:
             validate_url(response.geturl())
             length = response.headers.get("Content-Length")
             if length and int(length) > limit:

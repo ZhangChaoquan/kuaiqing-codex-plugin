@@ -1,6 +1,6 @@
 ---
 name: kuaiqing-account-connection
-description: 连接、检查或断开快擎 Codex OAuth 账号。用户明确要求登录、查看当前快擎账号或断开快擎时使用。
+description: 连接、检查或断开快擎 Codex OAuth 账号。用户要求登录、查看当前快擎账号、断开快擎，或网站管理任务需要检查连接和同步官方 Skills 时使用。
 ---
 
 # 快擎账号连接
@@ -10,6 +10,7 @@ description: 连接、检查或断开快擎 Codex OAuth 账号。用户明确要
 ## 检查与连接
 
 - 检查当前账号时调用 `kq.account.get_current`。
+- 连接成功后或开始已连接网站的管理任务时，使用本插件 `scripts/skill_manager.py sync` 自动维护官方业务 Skills，并读取返回的任务相关 `skill_path`。不重复请求 OAuth 或逐项更新确认；更新失败按 Skill Manager 规则处理。
 - MCP 返回需要认证时，使用 Codex 官方 OAuth 登录流程；不索取或保存用户密码、Token。
 
 ## 断开

@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import fcntl
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -101,6 +103,15 @@ def fetch_catalog() -> dict[str, Any]:
         raise SkillManagerError("Skill 目录不是有效 UTF-8 JSON。") from exc
     if catalog.get("catalog_version") != 1 or not isinstance(catalog.get("skills"), list):
         raise SkillManagerError("不支持的 Skill 目录格式。")
+    seen = set()
+    for item in catalog["skills"]:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("version"), str):
+            raise SkillManagerError("Skill 目录条目格式无效。")
+        validate_skill_id(item["id"])
+        parse_semver(item["version"])
+        if item["id"] in seen:
+            raise SkillManagerError("Skill 目录包含重复标识。")
+        seen.add(item["id"])
     return catalog
 
 
@@ -315,11 +326,50 @@ def save_registry(registry: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def validate_skill_id(skill_id: str) -> None:
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", skill_id) or len(skill_id) > 64:
+        raise SkillManagerError("Skill 标识无效。")
+
+
+@contextmanager
+def mutation_lock():
+    path = registry_path().with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise SkillManagerError("另一个 Skill 更新正在执行，请稍后重试。") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def file_hashes(root: Path) -> dict[str, str]:
+    if root.is_symlink():
+        raise SkillManagerError("Skill 目录不能是软链接。")
+    result = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise SkillManagerError("Skill 目录包含软链接。")
+        if path.is_file():
+            result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return result
+
+
 def install(skill_id: str, expected_version: str, confirmed: bool) -> None:
+    with mutation_lock():
+        _install(skill_id, expected_version, confirmed)
+
+
+def _install(skill_id: str, expected_version: str, confirmed: bool, item: dict[str, Any] | None = None) -> None:
     if not confirmed:
         raise SkillManagerError("安装或更新前必须取得用户明确确认，并传入 --confirmed。")
+    validate_skill_id(skill_id)
     parse_semver(expected_version)
-    item = catalog_item(skill_id, expected_version)
+    registry = load_registry()
+    item = item or catalog_item(skill_id, expected_version)
     validate_compatibility(item)
     verify_signature(item)
     package = fetch_bytes(item["package_url"])
@@ -352,15 +402,12 @@ def install(skill_id: str, expected_version: str, confirmed: bool) -> None:
             rollback.parent.mkdir(parents=True, exist_ok=True)
             os.replace(backup, rollback)
             moved_backup = True
-        if moved_stale:
-            shutil.rmtree(stale)
-
-        registry = load_registry()
         previous = registry["skills"].get(skill_id, {}).get("version") if moved_target else None
         registry["skills"][skill_id] = {
             "version": expected_version,
             "rollback_version": previous,
             "sha256": item["sha256"],
+            "file_hashes": file_hashes(target),
         }
         save_registry(registry)
     except Exception:
@@ -377,9 +424,17 @@ def install(skill_id: str, expected_version: str, confirmed: bool) -> None:
     finally:
         if temporary.exists():
             shutil.rmtree(temporary)
+    if moved_stale and stale.exists():
+        shutil.rmtree(stale)
 
 
 def rollback(skill_id: str) -> None:
+    validate_skill_id(skill_id)
+    with mutation_lock():
+        _rollback(skill_id)
+
+
+def _rollback(skill_id: str) -> None:
     registry = load_registry()
     state = registry["skills"].get(skill_id)
     if not isinstance(state, dict) or not state.get("rollback_version"):
@@ -401,7 +456,67 @@ def rollback(skill_id: str) -> None:
         raise
     state["version"], state["rollback_version"] = state["rollback_version"], state["version"]
     state.pop("sha256", None)
+    state["file_hashes"] = file_hashes(target)
+    state["pinned_version"] = state["version"]
     save_registry(registry)
+
+
+def sync() -> dict[str, Any]:
+    """Maintain signed website Skills; never overwrite unmanaged or locally edited files."""
+    with mutation_lock():
+        catalog = fetch_catalog()
+        registry = load_registry()["skills"]
+        results = []
+        for item in catalog["skills"]:
+            skill_id = item.get("id", "")
+            if skill_id == "kuaiqing-skill-release-management" or not (item.get("auto_install") is True or skill_id in registry):
+                continue
+            try:
+                validate_skill_id(skill_id)
+                validate_compatibility(item)
+                verify_signature(item)
+                target = skills_root() / skill_id
+                state = registry.get(skill_id, {})
+                if target.exists() and not state:
+                    raise SkillManagerError("同名 Skill 不由官方管理器管理，已保留原目录。")
+                if target.exists() and state:
+                    expected_files = state.get("file_hashes")
+                    if expected_files is None:
+                        # Older registries only stored the ZIP digest. Recover its signed file snapshot.
+                        version = state.get("version", "")
+                        validate_skill_id(skill_id)
+                        parse_semver(version)
+                        parsed = urllib.parse.urlparse(CATALOG_URL)
+                        previous_url = urllib.parse.urlunparse(parsed._replace(path=f"/api/v1/codex/skills/{skill_id}/{version}/download"))
+                        previous = fetch_bytes(previous_url)
+                        if hashlib.sha256(previous).hexdigest() != state.get("sha256"):
+                            raise SkillManagerError("旧版安装记录无法验证，请显式检查后更新。")
+                        with tempfile.TemporaryDirectory(prefix="kq-skill-baseline-") as directory:
+                            baseline = Path(directory)
+                            validate_and_unpack(previous, skill_id, baseline)
+                            expected_files = file_hashes(baseline)
+                    if file_hashes(target) != expected_files:
+                        raise SkillManagerError("Skill 有本地修改，自动更新已停止并保留修改。")
+                if state.get("pinned_version"):
+                    if not target.is_dir():
+                        raise SkillManagerError("固定版本的本地目录缺失，请显式检查后恢复。")
+                    status = "pinned"
+                elif state.get("version") and compare_semver(item["version"], state["version"]) < 0:
+                    status = "rollback_available"
+                elif state.get("version") == item["version"] and target.is_dir():
+                    if state.get("sha256") and state["sha256"] != item["sha256"]:
+                        raise SkillManagerError("相同版本摘要发生变化，拒绝覆盖不可变版本。")
+                    status = "current"
+                else:
+                    _install(skill_id, item["version"], True, item)
+                    status = "updated" if state else "installed"
+                results.append({"id": skill_id, "status": status, "version": load_registry()["skills"][skill_id]["version"], "skill_path": str(target / "SKILL.md")})
+            except (SkillManagerError, OSError, ValueError) as exc:
+                results.append({"id": skill_id, "status": "failed", "message": str(exc)})
+        if not results:
+            raise SkillManagerError("目录未提供可自动安装的业务 Skill，请检查官方发布目录。")
+        return {"success": all(item["status"] != "failed" for item in results), "skills": results,
+                "load_instructions": "Read the returned SKILL.md for the requested website task in this chat; new tasks discover installed Skills automatically."}
 
 
 def check(skill_id: str | None) -> dict[str, Any]:
@@ -427,6 +542,7 @@ def check(skill_id: str | None) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="KuaiQing Skill Manager")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("sync")
     check_parser = subparsers.add_parser("check")
     check_parser.add_argument("skill", nargs="?")
     for command in ("install", "update"):
@@ -439,6 +555,10 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        if args.command == "sync":
+            result = sync()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["success"] else 1
         if args.command == "check":
             print(json.dumps(check(args.skill), ensure_ascii=False, indent=2))
         elif args.command in {"install", "update"}:

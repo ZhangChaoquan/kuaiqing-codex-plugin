@@ -1,27 +1,24 @@
 ---
 name: kuaiqing-skill-manager
-description: 检查、安装、更新或回滚快擎官方 Skills。用户明确要求管理快擎 Skills 时使用；单独检查不需要批准。
+description: 连接快擎 OAuth 后及开始网站管理任务时自动检查、安装和更新签名官方业务 Skills；也支持手动检查、更新及回滚。
 ---
 
 # 快擎 Skill Manager
 
-只使用本 Skill 所在插件根目录的 `scripts/skill_manager.py`，不从网络下载或临时编写更新脚本。
+只使用本 Skill 所在插件根目录的 `scripts/skill_manager.py`，不下载或临时编写更新脚本。
 
-## 检查
+## 自动维护
 
-运行 `python3 <插件根目录>/scripts/skill_manager.py check [skill-id]`，向用户展示已安装版本、可用版本和更新说明。检查不产生批准请求。
+OAuth 连接成功后，以及每个网站管理任务开始时，运行 `python3 <插件根目录>/scripts/skill_manager.py sync`。官方业务 Skill 的安装和更新属于连接后的能力维护，不逐次请求确认，不要求重复 OAuth。公开目录不含用户数据，更新器也不接收 OAuth token。
 
-## 安装或更新
+读取 JSON 结果：`installed/updated/current` 表示可读取其 `skill_path`。当前对话根据用户任务选择并直接读取最新 `SKILL.md` 及其所需引用；新任务会自动发现已安装 Skill。不能把文件已更新说成运行中对话的旧指令已经自动替换。
 
-1. 先执行 `check` 并展示目标版本与更新说明。
-2. 取得用户一次明确确认。
-3. 运行 `python3 <插件根目录>/scripts/skill_manager.py install <skill-id> <明确版本> --confirmed`；已安装时也可使用同参数的 `update`。
-4. 成功后提示用户新建 Codex 任务加载新版本。
+`failed` 必须说明原因，不可声称更新成功；所需 Skill 更新失败时暂停依赖它的操作。已有手工 Skill、局部修改、坏签名、摘要不符或不兼容版本均不覆盖。管理员发布 Skill 不自动安装；回滚固定的版本不自动升级，目录降级只报告 `rollback_available`。不因目录下架而删除本地文件或网站数据。
 
-不得把用户对其他业务操作的确认当成 Skill 安装确认，也不得省略预期版本或 `--confirmed`。
+## 手动检查、更新和回滚
 
-## 回滚
+- `check [skill-id]`：查询版本与发布说明，无写入。
+- 用户明确要求手动安装或更新时：先 check，使用明确版本运行 `install <skill-id> <version> --confirmed` 或 `update`。已有明确指令无需重复确认；该命令会替换目标目录，检测到手工修改时先说明精确影响。
+- 仅在用户明确要求回滚时运行 `rollback <skill-id>`；保留一个上一版，并固定回滚后的版本。明确手动 update 可解除固定。
 
-仅在用户明确要求回滚时，运行 `python3 <插件根目录>/scripts/skill_manager.py rollback <skill-id>`。本地只保留一个上一版。
-
-签名、摘要、兼容性、ZIP 白名单或原子替换任一失败时停止，并说明当前已安装版本保持不变。
+签名、摘要、兼容性、ZIP 白名单或原子替换失败均保留当前版本并报告；不得转用平台 SSH 或数据库代做网站业务。

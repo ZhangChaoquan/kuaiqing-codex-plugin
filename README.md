@@ -20,4 +20,4 @@ codex plugin marketplace add https://github.com/ZhangChaoquan/kuaiqing-codex-plu
 codex plugin add kuaiqing@kuaiqing
 ```
 
-Marketplace 更新或插件安装后，新建 Codex 任务再验证 Skill 和 MCP。
+Marketplace 更新或插件安装后，新建 Codex 任务加载插件入口。OAuth 连接成功后及每个网站管理任务开始时，插件 Skill 自动运行 `skill_manager.py sync`，安装或更新官方业务 Skills；当前对话直接读取返回的最新 Skill 文件。更新继续校验签名、摘要与兼容性，不覆盖手工 Skill 或本地修改。业务发布确认与 Skill 更新分开，平台维护对话只补能力。

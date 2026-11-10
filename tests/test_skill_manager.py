@@ -95,6 +95,60 @@ class SkillManagerTest(unittest.TestCase):
         sm.rollback("kuaiqingweb-com")
         self.assertEqual(sm.load_registry()["skills"]["kuaiqingweb-com"]["version"], "0.1.0")
 
+    def sync(self, item: dict, package: bytes) -> dict:
+        item["auto_install"] = True
+        with mock.patch.object(sm, "fetch_catalog", return_value={"catalog_version": 1, "skills": [item]}), \
+             mock.patch.object(sm, "fetch_bytes", return_value=package), \
+             mock.patch.object(sm, "plugin_version", return_value="0.1.3"):
+            return sm.sync()
+
+    def test_automatic_sync_installs_updates_and_preserves_local_edits(self) -> None:
+        package = self.package()
+        result = self.sync(self.item(package), package)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["skills"][0]["status"], "installed")
+        self.assertEqual(self.sync(self.item(package), package)["skills"][0]["status"], "current")
+        update = self.package({"SKILL.md": b"---\nname: kuaiqingweb-com\ndescription: updated\n---\n# v2\n"})
+        self.assertEqual(self.sync(self.item(update, "0.1.1"), update)["skills"][0]["status"], "updated")
+        target = sm.skills_root() / "kuaiqingweb-com" / "SKILL.md"
+        target.write_text("my custom instructions")
+        result = self.sync(self.item(update, "0.1.2"), update)
+        self.assertFalse(result["success"])
+        self.assertEqual(target.read_text(), "my custom instructions")
+        self.assertEqual(sm.load_registry()["skills"]["kuaiqingweb-com"]["version"], "0.1.1")
+
+    def test_sync_preserves_unmanaged_directory_and_rejects_invalid_signature(self) -> None:
+        target = sm.skills_root() / "kuaiqingweb-com"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text("user-owned")
+        package = self.package()
+        self.assertFalse(self.sync(self.item(package), package)["success"])
+        self.assertEqual((target / "SKILL.md").read_text(), "user-owned")
+        item = self.item(package)
+        item["signature"] = base64.b64encode(b"x" * 64).decode()
+        self.assertFalse(self.sync(item, package)["success"])
+        self.assertFalse(sm.registry_path().exists())
+
+    def test_sync_does_not_automatically_downgrade_or_undo_explicit_rollback(self) -> None:
+        package = self.package()
+        self.install(self.item(package, "0.1.1"), package)
+        self.assertEqual(self.sync(self.item(package), package)["skills"][0]["status"], "rollback_available")
+        self.install(self.item(package, "0.1.2"), package)
+        sm.rollback("kuaiqingweb-com")
+        self.assertEqual(self.sync(self.item(package, "0.1.2"), package)["skills"][0]["status"], "pinned")
+        self.assertEqual(sm.load_registry()["skills"]["kuaiqingweb-com"]["version"], "0.1.1")
+
+    def test_malformed_registry_and_traversal_do_not_change_installed_files(self) -> None:
+        with self.assertRaises(sm.SkillManagerError):
+            sm.install("../outside", "0.1.0", True)
+        package = self.package()
+        self.install(self.item(package), package)
+        original = (sm.skills_root() / "kuaiqingweb-com" / "SKILL.md").read_bytes()
+        sm.registry_path().write_text("broken json")
+        with self.assertRaises(sm.SkillManagerError):
+            self.install(self.item(package, "0.1.1"), package)
+        self.assertEqual((sm.skills_root() / "kuaiqingweb-com" / "SKILL.md").read_bytes(), original)
+
     def test_requires_explicit_confirmation(self) -> None:
         with self.assertRaises(sm.SkillManagerError):
             sm.install("kuaiqingweb-com", "0.1.0", False)
